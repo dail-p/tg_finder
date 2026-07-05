@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tg-finder"
+version = "0.1.0"
+description = "Telegram bot: smart search across channel posts via RAG"
+requires-python = ">=3.12"
+readme = "README.md"
+dependencies = [
+    "aiogram>=3.4,<4.0",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "SQLAlchemy>=2.0",
+    "asyncpg>=0.29",
+    "greenlet>=3.0",
+    "alembic>=1.13",
+    "pgvector>=0.2.4",
+    "Telethon>=1.36",
+    "openai>=1.30",
+    "APScheduler>=3.10",
+    "structlog>=24.1",
+    "tiktoken>=0.7",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+]
+
+[project.scripts]
+tg-finder = "main:main"
+tg-finder-bot = "src.bot.app:run"
+tg-finder-index = "src.indexer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+# Test fakes (FakeSession, FakeEmbeddings) are structurally compatible but
+# don't inherit from SQLAlchemy/openai types.
+disable_error_code = ["arg-type", "attr-defined", "call-arg"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]

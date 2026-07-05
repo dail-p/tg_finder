@@ -1,0 +1,46 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Telegram sessions
+*.session
+*.session-journal
+telethon.session*
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kilo internal
+.kilo/node_modules/
+.kilo/package-lock.json
+.kilo/package.json
+
+# Alembic cache
+alembic/versions/__pycache__/
