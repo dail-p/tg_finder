@@ -22,6 +22,21 @@ services:
         condition: service_healthy
     env_file: .env
     environment:
+      APP_MODE: bot
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tg_finder}:${POSTGRES_PASSWORD:-tg_finder}@db:5432/${POSTGRES_DB:-tg_finder}
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      bot:
+        # start after bot has already applied migrations
+        condition: service_started
+    env_file: .env
+    environment:
+      APP_MODE: scheduler
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tg_finder}:${POSTGRES_PASSWORD:-tg_finder}@db:5432/${POSTGRES_DB:-tg_finder}
     restart: unless-stopped
 

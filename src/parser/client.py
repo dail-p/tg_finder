@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 
 from telethon import TelegramClient
 from telethon.errors import FloodWaitError
+from telethon.sessions import StringSession
 from telethon.tl.types import Message
 
 from src.config import settings
@@ -15,11 +16,20 @@ log = get_logger(__name__)
 
 
 def get_telethon_client() -> TelegramClient:
+    """Build a Telethon client.
+
+    In production a pre-authorized ``TELEGRAM_SESSION_STRING`` is used so the
+    client can connect non-interactively. When it is empty (local/dev) we fall
+    back to a file-based session that can be authorized interactively.
+    """
+    session_string = settings.telegram_session_string.strip()
+    session = (
+        StringSession(session_string) if session_string else settings.telegram_session_name
+    )
     return TelegramClient(
-        settings.telegram_session_name,
+        session,
         settings.telegram_api_id,
         settings.telegram_api_hash,
-        base_url=None if settings.openai_base_url.startswith("https://api.openai.com") else None,
     )
 
 

@@ -5,7 +5,6 @@ import asyncio
 import sys
 from collections.abc import Sequence
 
-from src.config import settings
 from src.db.session import session_factory
 from src.indexer.embeddings import EmbeddingsClient
 from src.indexer.pipeline import index_channel
@@ -37,7 +36,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 async def _add_channel(channel: str, full: bool) -> None:
     client = get_telethon_client()
-    await client.start(phone=None if not settings.telegram_session_string else None)
+    await client.start()
     try:
         parser = TelethonParser(client)
         embeddings = EmbeddingsClient()

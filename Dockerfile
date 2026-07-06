@@ -15,9 +15,13 @@ COPY src ./src
 COPY main.py ./
 COPY alembic.ini ./
 COPY alembic ./alembic
+COPY scripts ./scripts
+COPY docker-entrypoint.sh ./
 
 RUN pip install --upgrade pip && pip install .
 
+RUN chmod +x docker-entrypoint.sh
+
 ENV PYTHONPATH=/app
 
-CMD ["python", "main.py"]
+ENTRYPOINT ["./docker-entrypoint.sh"]
