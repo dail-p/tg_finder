@@ -24,8 +24,8 @@ dp.callback_query.outer_middleware(AuthMiddleware())
 dp.message.middleware(DbSessionMiddleware(session_factory))
 dp.callback_query.middleware(DbSessionMiddleware(session_factory))
 
-dp.include_router(base_router)
 dp.include_router(search_router)
+dp.include_router(base_router)
 
 
 async def _on_startup() -> None:
