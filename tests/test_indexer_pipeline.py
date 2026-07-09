@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -7,7 +8,7 @@ import pytest
 
 from src.db.models import Channel, Post, PostChunk
 from src.indexer.chunker import chunk_text
-from src.indexer.pipeline import _store_post, get_or_create_channel
+from src.indexer.pipeline import _store_post, get_or_create_channel, index_channel
 from src.parser.models import ParsedPost
 from tests.conftest import FakeEmbeddings, make_unit_vector
 
@@ -51,6 +52,8 @@ class FakeSession:
     # Queue of return values for execute(...).scalar_one_or_none()
     _scalar_returns: list = field(default_factory=list)
     executed: list = field(default_factory=list)
+    commit_count: int = 0
+    savepoint_rollbacks: int = 0
 
     def set_scalar_returns(self, *values) -> None:
         self._scalar_returns = list(values)
@@ -72,10 +75,29 @@ class FakeSession:
     async def commit(self) -> None:
         await self.flush()
         self.committed = True
+        self.commit_count += 1
 
     async def rollback(self) -> None:
         self.rolled_back = True
         self.added.clear()
+
+    def begin_nested(self) -> _Savepoint:
+        """Simulate a SAVEPOINT: a rollback only discards the savepoint, not
+        the outer transaction's committed/flushed rows."""
+        return _Savepoint(self)
+
+
+class _Savepoint:
+    def __init__(self, session: FakeSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> _Savepoint:
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        if exc is not None:
+            self._session.savepoint_rollbacks += 1
+        return False  # propagate exceptions to the caller's try/except
 
 
 @pytest.mark.asyncio
@@ -173,3 +195,86 @@ async def test_store_post_rolls_back_on_embedding_failure() -> None:
 
     with pytest.raises(RuntimeError):
         await _store_post(session, channel, parsed, embeddings)
+
+
+@dataclass
+class FakeParser:
+    """Stub TelethonParser: yields a fixed list of posts."""
+    title: str = "News"
+    username: str | None = "news"
+    posts: list[ParsedPost] = field(default_factory=list)
+
+    async def resolve_channel(self, channel: str) -> tuple[str, str | None]:
+        return self.title, self.username
+
+    async def iter_posts(self, channel: str, min_id: int = 0) -> AsyncIterator[ParsedPost]:
+        for p in self.posts:
+            if p.telegram_message_id > min_id:
+                yield p
+
+
+@pytest.mark.asyncio
+async def test_index_channel_commits_channel_before_loop() -> None:
+    """The channel must be persisted before indexing starts so a per-post
+    failure can never trigger an FK violation on posts.channel_id."""
+    session = FakeSession()
+    session.set_scalar_returns(None)  # no existing channel
+
+    parser = FakeParser(posts=[])
+    embeddings = FakeEmbeddings()
+
+    channel, created = await index_channel(
+        session, parser, embeddings, "@news", incremental=False
+    )
+    assert channel.telegram_id == "@news"
+    assert created == 0
+    # commit() called once for the channel, once at the end of the loop.
+    assert session.commit_count >= 1
+    # No full rollback of the outer transaction.
+    assert session.rolled_back is False
+
+
+@pytest.mark.asyncio
+async def test_index_channel_failed_post_does_not_wipe_channel() -> None:
+    """Regression for the FK violation: a failing post (embedding error) must
+    not roll back the channel, and subsequent posts must still be insertable
+    with a valid channel_id reference."""
+    session = FakeSession()
+    # Channel: none existing.
+    # Then for each post, _store_post does one execute() to check duplicates.
+    session.set_scalar_returns(None, None, None)
+
+    class FlakeyEmbeddings(FakeEmbeddings):
+        def __init__(self) -> None:
+            super().__init__()
+            self._call = 0
+
+        async def embed(self, texts):
+            self._call += 1
+            if self._call == 1:
+                raise RuntimeError("transient openai error")
+            return await super().embed(texts)
+
+    embeddings = FlakeyEmbeddings()
+    posts = [
+        ParsedPost(telegram_message_id=1, content="упавший пост", media_type="text", posted_at=None),
+        ParsedPost(telegram_message_id=2, content="хороший пост", media_type="text", posted_at=None),
+    ]
+    parser = FakeParser(posts=posts)
+
+    channel, created = await index_channel(
+        session, parser, embeddings, "@news", incremental=False
+    )
+
+    # Channel survived: it has a stable id and was committed before the loop.
+    assert channel.id is not None
+    assert session.commit_count >= 1
+    # The failed post triggered a savepoint rollback, not a full rollback.
+    assert session.savepoint_rollbacks == 1
+    assert session.rolled_back is False
+    # The second (successful) post was still inserted against the channel.
+    assert created == 1
+    inserted_posts = [o for o in session.added if isinstance(o, Post)]
+    assert len(inserted_posts) == 1
+    assert inserted_posts[0].channel_id == channel.id
+    assert inserted_posts[0].telegram_message_id == 2

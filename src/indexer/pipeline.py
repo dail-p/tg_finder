@@ -108,16 +108,22 @@ async def index_channel(
     title, username = await parser.resolve_channel(channel_ref)
     telegram_id = str(channel_ref)
     channel = await get_or_create_channel(session, telegram_id, title, username)
+    # Persist the channel row before the indexing loop so that a per-post
+    # failure cannot wipe it (and the FK from posts -> channels stays valid).
+    await session.commit()
 
     min_id = channel.last_indexed_message_id or 0 if incremental else 0
 
     log.info("indexer.start", channel=title, telegram_id=telegram_id, min_id=min_id)
-    created = 0
+    created = failed = 0
     max_msg_id = min_id
 
     async for post in parser.iter_posts(channel_ref, min_id=min_id):
         try:
-            inserted = await _store_post(session, channel, post, embeddings)
+            # Isolate each post in a SAVEPOINT so a failure only rolls back
+            # that post, not the channel or previously committed posts.
+            async with session.begin_nested():
+                inserted = await _store_post(session, channel, post, embeddings)
         except Exception as exc:
             log.error(
                 "indexer.post_failed",
@@ -125,7 +131,7 @@ async def index_channel(
                 message_id=post.telegram_message_id,
                 error=str(exc),
             )
-            await session.rollback()
+            failed += 1
             continue
         if inserted:
             created += 1
@@ -133,11 +139,11 @@ async def index_channel(
             max_msg_id = post.telegram_message_id
         if created % 50 == 0 and created > 0:
             await session.commit()
-            log.info("indexer.progress", channel=title, indexed=created)
+            log.info("indexer.progress", channel=title, indexed=created, failed=failed)
 
     channel.last_indexed_message_id = max_msg_id
     await session.commit()
-    log.info("indexer.done", channel=title, created=created)
+    log.info("indexer.done", channel=title, created=created, failed=failed)
     return channel, created
 
 
