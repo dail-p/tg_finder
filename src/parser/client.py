@@ -126,7 +126,7 @@ class TelethonParser:
         entity = await self.fetch_channel_entity(channel)
         offset_id = 0
         total = 0
-        history_limit = self.history_limit if limit is None else limit
+        history_limit = self.history_limit if limit is None else min(self.history_limit, limit)
 
         while total < history_limit:
             try:
