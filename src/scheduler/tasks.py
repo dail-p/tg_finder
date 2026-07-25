@@ -7,7 +7,6 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from src.config import settings
 from src.db.session import session_factory
-from src.indexer.embeddings import EmbeddingsClient
 from src.indexer.pipeline import index_all_channels
 from src.logging_setup import get_logger
 from src.parser.client import TelethonParser, get_telethon_client
@@ -21,9 +20,8 @@ async def _indexing_job() -> None:
     try:
         await client.start()
         parser = TelethonParser(client)
-        embeddings = EmbeddingsClient()
         try:
-            created = await index_all_channels(session_factory, parser, embeddings)
+            created = await index_all_channels(session_factory, parser)
             log.info("scheduler.indexing_job.done", new_posts=created)
         except Exception as exc:
             log.error("scheduler.indexing_job.error", error=str(exc))

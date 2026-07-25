@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+
+from src.parser.extract import extract_hashtags, extract_title
 
 
 def _to_naive_utc(dt: datetime | None) -> datetime | None:
@@ -26,9 +28,18 @@ class ParsedPost:
     content: str
     media_type: str
     posted_at: datetime | None
+    title: str = ""
+    hashtags: list[str] = field(default_factory=list)
+    media: list[dict] = field(default_factory=list)
+    grouped_id: int | None = None
 
     def __post_init__(self) -> None:
         self.posted_at = _to_naive_utc(self.posted_at)
+        # Derive title/hashtags from content unless passed explicitly.
+        if not self.title:
+            self.title = extract_title(self.content)
+        if not self.hashtags:
+            self.hashtags = extract_hashtags(self.content)
 
     @property
     def is_text(self) -> bool:

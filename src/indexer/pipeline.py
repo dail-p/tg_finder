@@ -5,9 +5,7 @@ from collections.abc import Iterable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.models import Channel, Post, PostChunk
-from src.indexer.chunker import chunk_text
-from src.indexer.embeddings import EmbeddingsClient
+from src.db.models import Channel, Post
 from src.logging_setup import get_logger
 from src.parser.client import TelethonParser
 from src.parser.models import ParsedPost
@@ -39,9 +37,8 @@ async def _store_post(
     session: AsyncSession,
     channel: Channel,
     parsed: ParsedPost,
-    embeddings: EmbeddingsClient,
 ) -> bool:
-    """Insert a post + its chunks (with embeddings). Returns True if created."""
+    """Insert a post with its full text and media metadata. True if created."""
     existing = (
         await session.execute(
             select(Post.id).where(
@@ -53,53 +50,26 @@ async def _store_post(
     if existing is not None:
         return False
 
-    if not parsed.is_text:
-        # Skip posts without textual content for embeddings, but keep metadata.
-        post = Post(
-            channel_id=channel.id,
-            telegram_message_id=parsed.telegram_message_id,
-            content=parsed.content or "",
-            media_type=parsed.media_type,
-            posted_at=parsed.posted_at,
-        )
-        session.add(post)
-        await session.flush()
-        return True
-
-    chunks = chunk_text(parsed.content)
-    if not chunks:
-        return False
-
-    vectors = await embeddings.embed([c.content for c in chunks])
-
+    # Media-only posts are stored the same way, just with an empty title/content.
     post = Post(
         channel_id=channel.id,
         telegram_message_id=parsed.telegram_message_id,
-        content=parsed.content,
+        content=parsed.content or "",
+        title=parsed.title,
+        hashtags=list(parsed.hashtags),
+        media=list(parsed.media),
+        grouped_id=parsed.grouped_id,
         media_type=parsed.media_type,
         posted_at=parsed.posted_at,
     )
     session.add(post)
     await session.flush()
-
-    for chunk, vec in zip(chunks, vectors):
-        session.add(
-            PostChunk(
-                post_id=post.id,
-                chunk_index=chunk.index,
-                content=chunk.content,
-                token_count=chunk.token_count,
-                embedding=vec,
-            )
-        )
-
     return True
 
 
 async def index_channel(
     session: AsyncSession,
     parser: TelethonParser,
-    embeddings: EmbeddingsClient,
     channel_ref: str,
     *,
     incremental: bool = True,
@@ -123,7 +93,7 @@ async def index_channel(
             # Isolate each post in a SAVEPOINT so a failure only rolls back
             # that post, not the channel or previously committed posts.
             async with session.begin_nested():
-                inserted = await _store_post(session, channel, post, embeddings)
+                inserted = await _store_post(session, channel, post)
         except Exception as exc:
             log.error(
                 "indexer.post_failed",
@@ -150,7 +120,6 @@ async def index_channel(
 async def index_all_channels(
     session_factory,
     parser: TelethonParser,
-    embeddings: EmbeddingsClient,
 ) -> int:
     """Iterate over all channels stored in DB and refresh them."""
     from sqlalchemy import select
@@ -166,7 +135,7 @@ async def index_all_channels(
         ref = ch.username or ch.telegram_id
         async with session_factory() as s:
             try:
-                _, created = await index_channel(s, parser, embeddings, ref)
+                _, created = await index_channel(s, parser, ref)
                 total += created
             except Exception as exc:
                 log.error("indexer.channel_failed", channel=ref, error=str(exc))

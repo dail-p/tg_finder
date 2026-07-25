@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tg-finder"
 version = "0.1.0"
-description = "Telegram bot: smart search across channel posts via RAG"
+description = "Telegram bot: two-step LLM search across full channel posts"
 requires-python = ">=3.12"
 readme = "README.md"
 dependencies = [
@@ -16,7 +16,6 @@ dependencies = [
     "asyncpg>=0.29",
     "greenlet>=3.0",
     "alembic>=1.13",
-    "pgvector>=0.2.4",
     "Telethon>=1.36",
     "openai>=1.30",
     "APScheduler>=3.10",

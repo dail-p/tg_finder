@@ -6,7 +6,6 @@ import sys
 from collections.abc import Sequence
 
 from src.db.session import session_factory
-from src.indexer.embeddings import EmbeddingsClient
 from src.indexer.pipeline import index_channel
 from src.logging_setup import get_logger, setup_logging
 from src.parser.client import TelethonParser, get_telethon_client
@@ -39,10 +38,9 @@ async def _add_channel(channel: str, full: bool) -> None:
     await client.start()
     try:
         parser = TelethonParser(client)
-        embeddings = EmbeddingsClient()
         async with session_factory() as s:
             ch, created = await index_channel(
-                s, parser, embeddings, channel, incremental=not full
+                s, parser, channel, incremental=not full
             )
         log.info("cli.add.done", channel=ch.title, created=created)
         print(f"✓ Indexed channel {ch.title!r} ({ch.telegram_id}); new posts: {created}")
@@ -62,7 +60,10 @@ async def _list_channels() -> None:
         print("No channels indexed.")
         return
     for ch in rows:
-        print(f"- {ch.title} | id={ch.telegram_id} | username={ch.username} | last_msg={ch.last_indexed_message_id}")
+        print(
+            f"- {ch.title} | id={ch.telegram_id} | username={ch.username} "
+            f"| last_msg={ch.last_indexed_message_id}"
+        )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

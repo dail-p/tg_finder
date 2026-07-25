@@ -33,8 +33,31 @@ def test_defaults_respected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@h:5432/d")
     monkeypatch.setenv("BOT_TOKEN", "x")
     s = Settings()  # type: ignore[call-arg]
-    assert s.embedding_model == "text-embedding-3-small"
-    assert s.embedding_dim == 1536
     assert s.llm_model == "gpt-4o-mini"
     assert s.indexer_interval_minutes == 15
-    assert s.search_top_k == 10
+    assert s.selector_token_budget == 30000
+    assert s.selector_max_posts == 20000
+    assert s.selector_max_selected == 15
+    assert s.answer_token_budget == 12000
+    assert s.answer_post_char_limit == 4000
+    assert s.title_max_len == 300
+
+
+def test_selector_and_answer_model_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@h:5432/d")
+    monkeypatch.setenv("LLM_MODEL", "base-model")
+    monkeypatch.setenv("SELECTOR_MODEL", "")
+    monkeypatch.setenv("ANSWER_MODEL", "")
+    s = Settings()  # type: ignore[call-arg]
+    assert s.selector_model_name == "base-model"
+    assert s.answer_model_name == "base-model"
+
+
+def test_selector_and_answer_model_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@h:5432/d")
+    monkeypatch.setenv("LLM_MODEL", "base-model")
+    monkeypatch.setenv("SELECTOR_MODEL", "sel-model")
+    monkeypatch.setenv("ANSWER_MODEL", "ans-model")
+    s = Settings()  # type: ignore[call-arg]
+    assert s.selector_model_name == "sel-model"
+    assert s.answer_model_name == "ans-model"

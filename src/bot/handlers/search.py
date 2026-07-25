@@ -5,10 +5,10 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.indexer.embeddings import EmbeddingsClient
 from src.logging_setup import get_logger
-from src.search.rag import RAGAnswerer
-from src.search.retrieval import Retriever
+from src.search.answerer import PostAnswerer
+from src.search.llm import get_llm_client
+from src.search.selector import TitleSelector
 
 search_router = Router(name="search")
 log = get_logger(__name__)
@@ -21,18 +21,18 @@ def _format_answer(answer) -> str:
     lines = [answer.text, ""]
     lines.append("<b>Источники:</b>")
     for i, src in enumerate(answer.sources, start=1):
-        lines.append(f'{i}. <a href="{src.to_link()}">{src.channel_title}</a>')
-    confidence_note = {
-        "high": "✅ Высокая уверенность",
-        "medium": "⚠️ Возможна неполнота ответа",
-        "low": "❓ Низкая уверенность",
-    }.get(answer.level, "")
-    lines.append(f"\n<i>{confidence_note} (similarity={answer.confidence})</i>")
+        title = (src.title or "").strip()
+        label = f"{src.channel_title} — {title}" if title else src.channel_title
+        images = src.image_count()
+        image_mark = f" 🖼 {images}" if images else ""
+        lines.append(f'{i}. <a href="{src.to_link()}">{label}</a>{image_mark}')
     return "\n".join(lines)
 
 
 @search_router.message(Command("search"))
-async def cmd_search(message: Message, command: CommandObject, db_session: AsyncSession) -> None:
+async def cmd_search(
+    message: Message, command: CommandObject, db_session: AsyncSession
+) -> None:
     query = (command.args or "").strip()
     if not query:
         await message.answer(
@@ -43,9 +43,8 @@ async def cmd_search(message: Message, command: CommandObject, db_session: Async
 
     await message.answer("🔍 Ищу по проиндексированным каналам…")
 
-    embeddings = EmbeddingsClient()
-    retriever = Retriever(embeddings)
-    answerer = RAGAnswerer(retriever)
+    llm = get_llm_client()
+    answerer = PostAnswerer(selector=TitleSelector(llm=llm), llm=llm)
 
     try:
         answer = await answerer.answer(db_session, query)

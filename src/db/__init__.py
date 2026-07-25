@@ -3,7 +3,6 @@ from src.db.models import (
     ChannelPack,
     PackChannel,
     Post,
-    PostChunk,
     User,
 )
 from src.db.session import engine, session_factory
@@ -15,6 +14,5 @@ __all__ = [
     "ChannelPack",
     "PackChannel",
     "Post",
-    "PostChunk",
     "User",
 ]

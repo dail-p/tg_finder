@@ -1,26 +1,26 @@
 # tg_finder
 
-Telegram bot that performs semantic search (RAG) across posts of Telegram channels and
-answers questions using an LLM grounded in the retrieved content.
+Telegram bot that answers questions about posts from Telegram channels using a
+two-step LLM pipeline: title selection, then full-post answer synthesis.
 
 ## Stage 1 (MVP) scope
 
 - Aiogram 3.x bot with auth whitelist (`/start`, `/help`, `/channels`, `/search`).
 - Telethon-based channel parser with FloodWait handling.
-- Indexer pipeline: posts → token-bounded overlapping chunks → OpenAI embeddings → pgvector.
-- RAG search: pgvector cosine ANN retrieval → LLM synthesis → answer with source links.
+- Indexer pipeline: full posts (text + media metadata + title/hashtags) → Postgres.
+- Search: LLM title selector → load full posts → LLM answer with source links.
 - Periodic indexing scheduler (APScheduler, default 15 min).
 
 ## Stack
 
-Python 3.12, aiogram 3.x, SQLAlchemy 2.0 async + asyncpg, pgvector, Alembic,
-Telethon, openai (embeddings + chat), APScheduler, structlog, tiktoken.
+Python 3.12, aiogram 3.x, SQLAlchemy 2.0 async + asyncpg, Alembic,
+Telethon, openai (chat), APScheduler, structlog, tiktoken.
 
 ## Quick start (local)
 
 1. Copy `.env.example` → `.env` and fill in `BOT_TOKEN`, `ALLOWED_USER_IDS`,
    `TELEGRAM_API_ID` / `TELEGRAM_API_HASH`, `OPENAI_API_KEY`, `DATABASE_URL`.
-2. Start Postgres with pgvector:
+2. Start Postgres:
 
    ```bash
    docker compose up -d db
@@ -45,6 +45,18 @@ Telethon, openai (embeddings + chat), APScheduler, structlog, tiktoken.
    python main.py
    ```
 
+## How search works
+
+1. All non-empty post titles (plus channel, date, hashtags) are sent to
+   `SELECTOR_MODEL` in one request, truncated to `SELECTOR_TOKEN_BUDGET`
+   (freshest first). The model returns relevant post ids as JSON.
+2. Full posts for those ids are loaded, album media is merged by `grouped_id`,
+   and the context (up to `ANSWER_TOKEN_BUDGET`) goes to `ANSWER_MODEL`.
+3. The bot formats the answer in HTML and appends source links with titles
+   and a photo count mark when present.
+
+Empty `SELECTOR_MODEL` / `ANSWER_MODEL` fall back to `LLM_MODEL`.
+
 ## Run modes
 
 `APP_MODE=bot` — only the polling bot.
@@ -62,7 +74,7 @@ tg-finder-index list                # list indexed channels
 ## Production deployment (Railway)
 
 The bot is a long-running polling service, so it needs an always-on host plus a
-managed Postgres with the `pgvector` extension. Railway covers both.
+managed Postgres. Railway covers both.
 
 ### 1. One-time: generate the Telethon session string
 
@@ -79,14 +91,14 @@ Copy the printed value into `TELEGRAM_SESSION_STRING`.
 
 1. New Project → **Deploy from GitHub repo**, select this repo. Railway uses
    `railway.json` / `Dockerfile` automatically.
-2. Add a **PostgreSQL** service, then enable pgvector once (Railway shell / psql):
-   `CREATE EXTENSION IF NOT EXISTS vector;` (the migration also runs it).
+2. Add a **PostgreSQL** service.
 3. Set variables on the app service:
    - `BOT_TOKEN`, `ALLOWED_USER_IDS`
    - `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING`
    - `OPENAI_API_KEY` (+ `OPENAI_BASE_URL` if using a proxy)
    - `DATABASE_URL` — reference the Postgres plugin
      (`postgresql+asyncpg://...`; a plain `postgresql://` URL is auto-normalized)
+   - Optional: `SELECTOR_MODEL`, `ANSWER_MODEL`
    - `ENVIRONMENT=prod`, `LOG_LEVEL=INFO`, `APP_MODE=bot`
 
 Migrations run automatically on every boot via `docker-entrypoint.sh`
@@ -125,11 +137,11 @@ docker compose up --build   # db + bot + scheduler, migrations auto-applied
 ```
 src/
   bot/        aiogram app, routers, middlewares (auth, db session)
-  db/         SQLAlchemy models, async session, pgvector usage
-  parser/     Telethon client + channel history iterator
-  indexer/    chunker, embeddings client, indexing pipeline, CLI
+  db/         SQLAlchemy models, async session
+  parser/     Telethon client, title/hashtag extract, history iterator
+  indexer/    indexing pipeline + CLI (full posts, no embeddings)
   scheduler/  APScheduler periodic indexing
-  search/     retriever (pgvector), RAG answerer, confidence levels
-  prompts/    LLM prompt templates
-alembic/      migrations (initial schema + pgvector extension)
+  search/     title selector, post answerer, shared LLM client
+  prompts/    LLM prompt templates (select + answer)
+alembic/      migrations (initial schema)
 ```

@@ -1,4 +1,4 @@
-"""initial schema with pgvector
+"""initial schema
 
 Revision ID: 0001
 Revises:
@@ -10,10 +10,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from pgvector.sqlalchemy import Vector
+from sqlalchemy.dialects import postgresql
 
 from alembic import op
-from src.config import settings
 
 # revision identifiers, used by Alembic.
 revision: str = "0001"
@@ -23,8 +22,6 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-
     op.create_table(
         "users",
         sa.Column("id", sa.BigInteger(), primary_key=True),
@@ -64,12 +61,35 @@ def upgrade() -> None:
         sa.Column("channel_id", sa.Integer(), sa.ForeignKey("channels.id", ondelete="CASCADE"), nullable=False),
         sa.Column("telegram_message_id", sa.BigInteger(), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
+        sa.Column("title", sa.Text(), nullable=False, server_default=""),
+        sa.Column(
+            "hashtags",
+            postgresql.JSONB(),
+            nullable=False,
+            server_default=sa.text("'[]'::jsonb"),
+        ),
+        sa.Column(
+            "media",
+            postgresql.JSONB(),
+            nullable=False,
+            server_default=sa.text("'[]'::jsonb"),
+        ),
+        sa.Column("grouped_id", sa.BigInteger(), nullable=True),
         sa.Column("media_type", sa.String(length=32), nullable=True),
         sa.Column("posted_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("indexed_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()")),
         sa.UniqueConstraint("channel_id", "telegram_message_id", name="uq_post_channel_msg"),
     )
     op.create_index("ix_posts_channel_id", "posts", ["channel_id"])
+    # Freshness ordering for the title-selection step.
+    op.create_index("ix_posts_posted_at", "posts", [sa.text("posted_at DESC NULLS LAST")])
+    # Ready for the (out-of-scope) per-channel filter.
+    op.create_index(
+        "ix_posts_channel_posted_at",
+        "posts",
+        ["channel_id", sa.text("posted_at DESC")],
+    )
+    # Kept as a hook for an FTS pre-filter if the token budget stops coping.
     op.create_index(
         "idx_posts_content_fts",
         "posts",
@@ -77,33 +97,11 @@ def upgrade() -> None:
         postgresql_using="gin",
     )
 
-    op.create_table(
-        "post_chunks",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("post_id", sa.Integer(), sa.ForeignKey("posts.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("chunk_index", sa.Integer(), nullable=False),
-        sa.Column("content", sa.Text(), nullable=False),
-        sa.Column("token_count", sa.Integer(), nullable=True),
-        sa.Column("embedding", Vector(settings.embedding_dim), nullable=True),
-        sa.Column("created_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()")),
-    )
-    op.create_index("ix_post_chunks_post_id", "post_chunks", ["post_id"])
-    op.create_index(
-        "ix_post_chunks_embedding_hnsw",
-        "post_chunks",
-        ["embedding"],
-        postgresql_using="hnsw",
-        postgresql_with={"m": 16, "ef_construction": 64},
-        postgresql_ops={"embedding": "vector_cosine_ops"},
-    )
-
 
 def downgrade() -> None:
-    op.drop_index("ix_post_chunks_embedding_hnsw", table_name="post_chunks")
-    op.drop_index("ix_post_chunks_post_id", table_name="post_chunks")
-    op.drop_table("post_chunks")
-
     op.drop_index("idx_posts_content_fts", table_name="posts")
+    op.drop_index("ix_posts_channel_posted_at", table_name="posts")
+    op.drop_index("ix_posts_posted_at", table_name="posts")
     op.drop_index("ix_posts_channel_id", table_name="posts")
     op.drop_table("posts")
 

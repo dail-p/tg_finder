@@ -47,6 +47,64 @@ def _media_type(message: Message) -> str:
     return "text"
 
 
+def _media_descriptors(message: Message) -> list[dict]:
+    """Describe a message's attachment without downloading bytes.
+
+    Telethon media objects differ per type, so every attribute is read via
+    ``getattr`` with a default — a missing attribute must never raise here.
+    """
+    media = getattr(message, "media", None)
+    if media is None:
+        return []
+
+    kind = _media_type(message)
+    if kind == "text":
+        return []
+
+    descriptor: dict = {
+        "kind": kind,
+        "mime_type": None,
+        "file_name": None,
+        "width": None,
+        "height": None,
+        "size": None,
+        "order": 0,
+    }
+
+    document = getattr(message, "document", None)
+    if document is not None:
+        descriptor["mime_type"] = getattr(document, "mime_type", None)
+        descriptor["size"] = getattr(document, "size", None)
+        for attr in getattr(document, "attributes", None) or []:
+            width = getattr(attr, "w", None)
+            height = getattr(attr, "h", None)
+            if width is not None:
+                descriptor["width"] = width
+            if height is not None:
+                descriptor["height"] = height
+            file_name = getattr(attr, "file_name", None)
+            if file_name is not None:
+                descriptor["file_name"] = file_name
+        return [descriptor]
+
+    photo = getattr(message, "photo", None)
+    if photo is not None:
+        descriptor["mime_type"] = "image/jpeg"
+        largest = None
+        for size in getattr(photo, "sizes", None) or []:
+            candidate_size = getattr(size, "size", None)
+            if candidate_size is None:
+                continue
+            if largest is None or candidate_size > getattr(largest, "size", 0):
+                largest = size
+        if largest is not None:
+            descriptor["width"] = getattr(largest, "w", None)
+            descriptor["height"] = getattr(largest, "h", None)
+            descriptor["size"] = getattr(largest, "size", None)
+
+    return [descriptor]
+
+
 class TelethonParser:
     """Iterates over a channel's history with FloodWait handling and batching."""
 
@@ -94,6 +152,8 @@ class TelethonParser:
                     content=content or "",
                     media_type=_media_type(message),
                     posted_at=message.date,
+                    media=_media_descriptors(message),
+                    grouped_id=getattr(message, "grouped_id", None),
                 )
 
             offset_id = result[-1].id
