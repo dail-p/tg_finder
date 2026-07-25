@@ -73,8 +73,12 @@ async def index_channel(
     channel_ref: str,
     *,
     incremental: bool = True,
+    limit: int | None = None,
 ) -> tuple[Channel, int]:
-    """Parse and index a single channel. Returns (Channel, posts_indexed)."""
+    """Parse and index a single channel. Returns (Channel, posts_indexed).
+
+    ``limit`` caps how many of the newest posts to pull (None = parser default).
+    """
     title, username = await parser.resolve_channel(channel_ref)
     telegram_id = str(channel_ref)
     channel = await get_or_create_channel(session, telegram_id, title, username)
@@ -84,11 +88,17 @@ async def index_channel(
 
     min_id = channel.last_indexed_message_id or 0 if incremental else 0
 
-    log.info("indexer.start", channel=title, telegram_id=telegram_id, min_id=min_id)
+    log.info(
+        "indexer.start",
+        channel=title,
+        telegram_id=telegram_id,
+        min_id=min_id,
+        limit=limit,
+    )
     created = failed = 0
     max_msg_id = min_id
 
-    async for post in parser.iter_posts(channel_ref, min_id=min_id):
+    async for post in parser.iter_posts(channel_ref, min_id=min_id, limit=limit):
         try:
             # Isolate each post in a SAVEPOINT so a failure only rolls back
             # that post, not the channel or previously committed posts.

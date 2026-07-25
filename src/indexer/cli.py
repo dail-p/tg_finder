@@ -27,22 +27,29 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Re-index from scratch (ignore last_indexed_message_id)",
     )
+    add.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Fetch only the N most recent posts (default: PARSER_HISTORY_LIMIT)",
+    )
 
     sub.add_parser("list", help="List indexed channels")
 
     return p
 
 
-async def _add_channel(channel: str, full: bool) -> None:
+async def _add_channel(channel: str, full: bool, limit: int | None = None) -> None:
     client = get_telethon_client()
     await client.start()
     try:
         parser = TelethonParser(client)
         async with session_factory() as s:
             ch, created = await index_channel(
-                s, parser, channel, incremental=not full
+                s, parser, channel, incremental=not full, limit=limit
             )
-        log.info("cli.add.done", channel=ch.title, created=created)
+        log.info("cli.add.done", channel=ch.title, created=created, limit=limit)
         print(f"✓ Indexed channel {ch.title!r} ({ch.telegram_id}); new posts: {created}")
     finally:
         await client.disconnect()
@@ -71,7 +78,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
 
     if args.cmd == "add":
-        asyncio.run(_add_channel(args.channel, args.full))
+        if args.limit is not None and args.limit < 1:
+            print("--limit must be a positive integer", file=sys.stderr)
+            return 2
+        asyncio.run(_add_channel(args.channel, args.full, args.limit))
     elif args.cmd == "list":
         asyncio.run(_list_channels())
     else:  # pragma: no cover

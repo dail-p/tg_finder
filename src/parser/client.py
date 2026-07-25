@@ -120,16 +120,19 @@ class TelethonParser:
         self,
         channel: str,
         min_id: int = 0,
+        *,
+        limit: int | None = None,
     ) -> AsyncIterator[ParsedPost]:
         entity = await self.fetch_channel_entity(channel)
         offset_id = 0
         total = 0
+        history_limit = self.history_limit if limit is None else limit
 
-        while total < self.history_limit:
+        while total < history_limit:
             try:
                 result = await self.client.get_messages(
                     entity,
-                    limit=min(self.batch_size, self.history_limit - total),
+                    limit=min(self.batch_size, history_limit - total),
                     offset_id=offset_id,
                     min_id=min_id,
                 )

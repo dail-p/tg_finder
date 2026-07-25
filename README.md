@@ -66,9 +66,10 @@ Empty `SELECTOR_MODEL` / `ANSWER_MODEL` fall back to `LLM_MODEL`.
 ## CLI
 
 ```bash
-tg-finder-index add @channel        # add + index a channel
-tg-finder-index add @channel --full # re-index from scratch
-tg-finder-index list                # list indexed channels
+tg-finder-index add @channel              # add + index a channel
+tg-finder-index add @channel --full       # re-index from scratch
+tg-finder-index add @channel --limit 100  # only the 100 most recent posts
+tg-finder-index list                      # list indexed channels
 ```
 
 ## Production deployment (Railway)

@@ -211,10 +211,21 @@ class FakeParser:
     async def resolve_channel(self, channel: str) -> tuple[str, str | None]:
         return self.title, self.username
 
-    async def iter_posts(self, channel: str, min_id: int = 0) -> AsyncIterator[ParsedPost]:
+    async def iter_posts(
+        self,
+        channel: str,
+        min_id: int = 0,
+        *,
+        limit: int | None = None,
+    ) -> AsyncIterator[ParsedPost]:
+        yielded = 0
         for p in self.posts:
-            if p.telegram_message_id > min_id:
-                yield p
+            if p.telegram_message_id <= min_id:
+                continue
+            yield p
+            yielded += 1
+            if limit is not None and yielded >= limit:
+                break
 
 
 @pytest.mark.asyncio
@@ -271,3 +282,30 @@ async def test_index_channel_failed_post_does_not_wipe_channel() -> None:
     assert len(inserted_posts) == 1
     assert inserted_posts[0].channel_id == channel.id
     assert inserted_posts[0].telegram_message_id == 2
+
+
+@pytest.mark.asyncio
+async def test_index_channel_respects_limit() -> None:
+    session = FakeSession()
+    # Channel lookup + existence checks for the two posts within the limit.
+    session.set_scalar_returns(None, None, None)
+
+    posts = [
+        ParsedPost(
+            telegram_message_id=i,
+            content=f"post {i}",
+            media_type="text",
+            posted_at=None,
+        )
+        for i in range(1, 6)
+    ]
+    parser = FakeParser(posts=posts)
+
+    channel, created = await index_channel(
+        session, parser, "@news", incremental=False, limit=2
+    )
+
+    assert created == 2
+    inserted = [o for o in session.added if isinstance(o, Post)]
+    assert [p.telegram_message_id for p in inserted] == [1, 2]
+    assert channel.last_indexed_message_id == 2
