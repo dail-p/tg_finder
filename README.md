@@ -57,10 +57,21 @@ Telethon, openai (chat), APScheduler, structlog, tiktoken.
 
 Empty `SELECTOR_MODEL` / `ANSWER_MODEL` fall back to `LLM_MODEL`.
 
+## Retention (automatic cleanup)
+
+Posts older than `POST_RETENTION_DAYS` (default 180 — half a year) are deleted
+by a scheduler job that runs at startup and then every
+`RETENTION_INTERVAL_HOURS` (default 24). Deletion goes by `posted_at`, falling
+back to `indexed_at` when the post has no date, and happens in batches of 5000.
+Set `POST_RETENTION_DAYS=0` to disable cleanup entirely.
+
+Pruning doesn't affect incremental indexing: that tracks
+`Channel.last_indexed_message_id`, so deleted posts are never re-fetched.
+
 ## Run modes
 
 `APP_MODE=bot` — only the polling bot.
-`APP_MODE=scheduler` — only the periodic indexer.
+`APP_MODE=scheduler` — only the periodic indexer (and retention cleanup).
 `APP_MODE=both` (default) — bot + scheduler in one process.
 
 ## CLI
@@ -70,6 +81,8 @@ tg-finder-index add @channel              # add + index a channel
 tg-finder-index add @channel --full       # re-index from scratch
 tg-finder-index add @channel --limit 100  # only the 100 most recent posts
 tg-finder-index list                      # list indexed channels
+tg-finder-index prune                     # delete posts older than the window
+tg-finder-index prune --days 90 --dry-run # preview a different window
 ```
 
 ## Production deployment (Railway)

@@ -41,6 +41,17 @@ def test_defaults_respected(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.answer_token_budget == 12000
     assert s.answer_post_char_limit == 4000
     assert s.title_max_len == 300
+    assert s.post_retention_days == 180
+    assert s.retention_interval_hours == 24
+    assert s.retention_enabled is True
+
+
+def test_retention_disabled_when_days_not_positive(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@h:5432/d")
+    monkeypatch.setenv("POST_RETENTION_DAYS", "0")
+    s = Settings()  # type: ignore[call-arg]
+    assert s.post_retention_days == 0
+    assert s.retention_enabled is False
 
 
 def test_selector_and_answer_model_fallback(monkeypatch: pytest.MonkeyPatch) -> None:

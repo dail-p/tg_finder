@@ -37,6 +37,20 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("list", help="List indexed channels")
 
+    prune = sub.add_parser("prune", help="Delete posts older than the retention window")
+    prune.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Retention window in days (default: POST_RETENTION_DAYS)",
+    )
+    prune.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Only report how many posts would be deleted",
+    )
+
     return p
 
 
@@ -73,6 +87,25 @@ async def _list_channels() -> None:
         )
 
 
+async def _prune_posts(days: int | None, dry_run: bool) -> None:
+    from src.config import settings
+    from src.indexer.retention import count_old_posts, prune_old_posts
+
+    window = settings.post_retention_days if days is None else days
+    if window <= 0:
+        print("Retention is disabled (POST_RETENTION_DAYS <= 0); nothing to prune.")
+        return
+
+    async with session_factory() as s:
+        if dry_run:
+            n = await count_old_posts(s, days)
+            print(f"Would delete {n} post(s) older than {window} day(s).")
+            return
+        deleted = await prune_old_posts(s, days)
+    log.info("cli.prune.done", deleted=deleted, retention_days=window)
+    print(f"✓ Deleted {deleted} post(s) older than {window} day(s).")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     setup_logging()
     args = _build_parser().parse_args(argv)
@@ -84,6 +117,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         asyncio.run(_add_channel(args.channel, args.full, args.limit))
     elif args.cmd == "list":
         asyncio.run(_list_channels())
+    elif args.cmd == "prune":
+        asyncio.run(_prune_posts(args.days, args.dry_run))
     else:  # pragma: no cover
         print(f"Unknown command: {args.cmd}", file=sys.stderr)
         return 2

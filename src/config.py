@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     indexer_interval_minutes: int = 15
     title_max_len: int = 300
 
+    # Retention (automatic cleanup of stale posts)
+    post_retention_days: int = 180
+    retention_interval_hours: int = 24
+
     # Search
     selector_token_budget: int = 30000
     selector_max_posts: int = 20000
@@ -68,6 +72,10 @@ class Settings(BaseSettings):
     @property
     def auth_enabled(self) -> bool:
         return bool(self.allowed_user_ids)
+
+    @property
+    def retention_enabled(self) -> bool:
+        return self.post_retention_days > 0
 
     @property
     def selector_model_name(self) -> str:
