@@ -57,3 +57,29 @@ def test_no_confidence_block() -> None:
     out = _format_answer(ans)
     assert "уверенность" not in out.lower()
     assert "similarity" not in out.lower()
+
+
+def test_answer_text_with_html_special_chars_is_escaped() -> None:
+    ans = _answer(text="Цена < 100 & больше 50 <b>жирный</b> текст")
+    out = _format_answer(ans)
+    assert "<b>жирный</b>" not in out
+    assert "&lt;" in out
+    assert "&amp;" in out
+
+
+def test_source_title_with_html_special_chars_is_escaped() -> None:
+    ans = _answer(sources=[_post(title="<script>alert(1)</script>")])
+    out = _format_answer(ans)
+    assert "<script>" not in out
+    assert "&lt;script&gt;" in out
+
+
+def test_long_answer_never_produces_dangling_tag() -> None:
+    ans = _answer(
+        text="слово " * 2000,
+        sources=[_post(channel=f"@news{i}", msg=i) for i in range(50)],
+    )
+    out = _format_answer(ans)
+    assert len(out) <= 4096
+    assert out.count("<a ") == out.count("</a>")
+    assert out.count("<b>") == out.count("</b>")
