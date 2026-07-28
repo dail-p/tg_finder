@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from html import escape as html_escape
 
 from aiogram import Router
@@ -20,6 +21,28 @@ log = get_logger(__name__)
 TELEGRAM_MESSAGE_LIMIT = 4096
 BODY_CHAR_BUDGET = 3500
 SOURCES_CHAR_BUDGET = TELEGRAM_MESSAGE_LIMIT - 50
+
+
+# LLMs default to Markdown-ish formatting; Telegram's HTML parse_mode doesn't
+# understand it, so it shows up as literal "**"/"###" clutter. Convert the
+# common tokens to HTML tags. Substitutions only fire on complete open+close
+# pairs, so a token truncation cuts in half is left as harmless plain text
+# rather than an unclosed tag that would break the whole message.
+_HR_RE = re.compile(r"^ {0,3}([-*_])( ?\1){2,}[ \t]*$", re.MULTILINE)
+_HEADER_RE = re.compile(r"^ {0,3}#{1,6}[ \t]+(.+?)[ \t]*#*$", re.MULTILINE)
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*|__(.+?)__", re.DOTALL)
+_CODE_RE = re.compile(r"`([^`\n]+)`")
+_BULLET_RE = re.compile(r"^[ \t]*[-*][ \t]+", re.MULTILINE)
+
+
+def _markdown_to_html(text: str) -> str:
+    text = html_escape(text)
+    text = _HR_RE.sub("", text)
+    text = _HEADER_RE.sub(lambda m: f"<b>{m.group(1)}</b>", text)
+    text = _BOLD_RE.sub(lambda m: f"<b>{m.group(1) or m.group(2)}</b>", text)
+    text = _CODE_RE.sub(lambda m: f"<code>{m.group(1)}</code>", text)
+    text = _BULLET_RE.sub("• ", text)
+    return text
 
 
 def _truncate_plain(text: str, limit: int) -> str:
@@ -46,7 +69,7 @@ def _format_source_line(i: int, src) -> str:
 def _format_answer(answer) -> str:
     # answer.text comes from the LLM and titles/channel names come from raw
     # Telegram post content — neither is safe HTML, so escape before embedding.
-    body = html_escape(_truncate_plain(answer.text, BODY_CHAR_BUDGET))
+    body = _markdown_to_html(_truncate_plain(answer.text, BODY_CHAR_BUDGET))
     if answer.no_answer or not answer.sources:
         return body
 

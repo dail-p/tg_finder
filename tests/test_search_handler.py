@@ -74,6 +74,34 @@ def test_source_title_with_html_special_chars_is_escaped() -> None:
     assert "&lt;script&gt;" in out
 
 
+def test_markdown_bold_and_headers_converted_to_html() -> None:
+    ans = _answer(text="### Заголовок\n**жирный** обычный текст")
+    out = _format_answer(ans)
+    assert "<b>Заголовок</b>" in out
+    assert "<b>жирный</b>" in out
+    assert "###" not in out
+    assert "**" not in out
+
+
+def test_markdown_bullets_converted_to_dot() -> None:
+    ans = _answer(text="- первый пункт\n- второй пункт")
+    out = _format_answer(ans)
+    assert "• первый пункт" in out
+    assert "- первый" not in out
+
+
+def test_markdown_horizontal_rule_removed() -> None:
+    ans = _answer(text="текст\n---\nещё текст")
+    out = _format_answer(ans)
+    assert "---" not in out
+
+
+def test_unclosed_markdown_token_left_as_plain_text() -> None:
+    ans = _answer(text="начало **незакрытый жирный текст")
+    out = _format_answer(ans)
+    assert out.count("<b>") == out.count("</b>")
+
+
 def test_long_answer_never_produces_dangling_tag() -> None:
     ans = _answer(
         text="слово " * 2000,
