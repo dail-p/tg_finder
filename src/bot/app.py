@@ -5,7 +5,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from src.bot.handlers import base_router, search_router
+from src.bot.handlers import base_router, folders_router, search_router
 from src.bot.middlewares.auth import AuthMiddleware
 from src.bot.middlewares.db import DbSessionMiddleware
 from src.config import settings
@@ -18,12 +18,14 @@ bot = Bot(
 
 dp = Dispatcher(storage=MemoryStorage())
 
-# Order matters: auth -> db
-dp.message.outer_middleware(AuthMiddleware())
-dp.callback_query.outer_middleware(AuthMiddleware())
+# Order matters: auth -> db. Auth opens its own short session to ensure the
+# users row exists; db injects the per-handler session.
+dp.message.outer_middleware(AuthMiddleware(session_factory=session_factory))
+dp.callback_query.outer_middleware(AuthMiddleware(session_factory=session_factory))
 dp.message.middleware(DbSessionMiddleware(session_factory))
 dp.callback_query.middleware(DbSessionMiddleware(session_factory))
 
+dp.include_router(folders_router)
 dp.include_router(search_router)
 dp.include_router(base_router)
 

@@ -66,7 +66,7 @@ def _format_source_line(i: int, src) -> str:
     return f'{i}. <a href="{href}">{html_escape(label)}</a>{image_mark}'
 
 
-def _format_answer(answer) -> str:
+def format_answer_for_message(answer) -> str:
     # answer.text comes from the LLM and titles/channel names come from raw
     # Telegram post content — neither is safe HTML, so escape before embedding.
     body = _markdown_to_html(_truncate_plain(answer.text, BODY_CHAR_BUDGET))
@@ -82,6 +82,11 @@ def _format_answer(answer) -> str:
         lines.append(line)
         used += len(line) + 1
     return "\n".join(lines)
+
+
+# Back-compat alias used by tests.
+def _format_answer(answer) -> str:
+    return format_answer_for_message(answer)
 
 
 @search_router.message(Command("search"))
