@@ -12,6 +12,7 @@ from src.packs.service import (
     PackLimitError,
     PackNameTakenError,
     PackNotFoundError,
+    RemoveChannelResult,
 )
 
 
@@ -200,11 +201,16 @@ async def test_delete_pack_missing_returns_false() -> None:
 
 @pytest.mark.asyncio
 async def test_add_channel_to_pack_creates_link() -> None:
-    # _pack_size (0), then existence check (None)
+    pack = ChannelPack(id=5, owner_id=111, name="News")
+    # get_pack, _pack_size (0), then existence check (None)
     session = FakeSession(
-        execute_returns=[_Result([], scalar=None), _Result(None, scalar=None)]
+        execute_returns=[
+            _Result(pack, scalar=pack),
+            _Result([], scalar=None),
+            _Result(None, scalar=None),
+        ]
     )
-    link = await packs.add_channel_to_pack(session, pack_id=5, channel_id=7)
+    link = await packs.add_channel_to_pack(session, pack_id=5, channel_id=7, owner_id=111)
     assert isinstance(link, PackChannel)
     assert link.pack_id == 5
     assert link.channel_id == 7
@@ -213,26 +219,77 @@ async def test_add_channel_to_pack_creates_link() -> None:
 
 @pytest.mark.asyncio
 async def test_add_channel_to_pack_rejects_duplicate() -> None:
+    pack = ChannelPack(id=5, owner_id=111, name="News")
     existing = PackChannel(pack_id=5, channel_id=7)
     session = FakeSession(
-        execute_returns=[_Result([], scalar=None), _Result(existing, scalar=existing)]
+        execute_returns=[
+            _Result(pack, scalar=pack),
+            _Result([], scalar=None),
+            _Result(existing, scalar=existing),
+        ]
     )
     with pytest.raises(ChannelAlreadyInPackError):
-        await packs.add_channel_to_pack(session, 5, 7)
+        await packs.add_channel_to_pack(session, 5, 7, 111)
+
+
+@pytest.mark.asyncio
+async def test_add_channel_to_pack_rejects_foreign_pack() -> None:
+    session = FakeSession(execute_returns=[_Result(None, scalar=None)])
+
+    with pytest.raises(PackNotFoundError):
+        await packs.add_channel_to_pack(session, 5, 7, owner_id=999)
+
+    assert session.added == []
 
 
 @pytest.mark.asyncio
 async def test_get_pack_channel_ids_returns_ints() -> None:
     session = FakeSession(execute_returns=[_Result([1, 2, 3], scalar=None)])
-    ids = await packs.get_pack_channel_ids(session, 5)
+    ids = await packs.get_pack_channel_ids(session, 5, owner_id=111)
     assert ids == [1, 2, 3]
     assert all(isinstance(x, int) for x in ids)
 
 
 @pytest.mark.asyncio
 async def test_remove_channel_from_pack_returns_bool() -> None:
-    session = FakeSession(execute_returns=[_DeleteResult(rowcount=1)])
-    assert await packs.remove_channel_from_pack(session, 5, 7) is True
+    pack = ChannelPack(id=5, owner_id=111, name="News")
+    session = FakeSession(
+        execute_returns=[
+            _Result(pack, scalar=pack),
+            _Result([7, 8], scalar=None),
+            _DeleteResult(rowcount=1),
+        ]
+    )
+
+    result = await packs.remove_channel_from_pack(session, 5, 7, owner_id=111)
+
+    assert result == RemoveChannelResult(removed=True, pack_deleted=False)
+
+
+@pytest.mark.asyncio
+async def test_remove_last_channel_deletes_empty_pack() -> None:
+    pack = ChannelPack(id=5, owner_id=111, name="News")
+    session = FakeSession(
+        execute_returns=[
+            _Result(pack, scalar=pack),
+            _Result([7], scalar=None),
+        ]
+    )
+
+    result = await packs.remove_channel_from_pack(session, 5, 7, owner_id=111)
+
+    assert result == RemoveChannelResult(removed=True, pack_deleted=True)
+    assert session.deleted == [pack]
+
+
+@pytest.mark.asyncio
+async def test_remove_channel_rejects_foreign_pack() -> None:
+    session = FakeSession(execute_returns=[_Result(None, scalar=None)])
+
+    with pytest.raises(PackNotFoundError):
+        await packs.remove_channel_from_pack(session, 5, 7, owner_id=999)
+
+    assert session.deleted == []
 
 
 @pytest.mark.asyncio

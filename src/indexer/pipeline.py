@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from sqlalchemy import select
+from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import Channel, Post
@@ -19,7 +19,15 @@ async def get_or_create_channel(
     title: str,
     username: str | None = None,
 ) -> Channel:
-    stmt = select(Channel).where(Channel.telegram_id == telegram_id)
+    conditions = [Channel.telegram_id == telegram_id]
+    if username:
+        conditions.append(Channel.username == username)
+    stmt = (
+        select(Channel)
+        .where(or_(*conditions))
+        .order_by(case((Channel.telegram_id == telegram_id, 0), else_=1))
+        .limit(1)
+    )
     existing = (await session.execute(stmt)).scalar_one_or_none()
     if existing is not None:
         if existing.title != title or existing.username != username:
@@ -80,7 +88,7 @@ async def index_channel(
     ``limit`` caps how many of the newest posts to pull (None = parser default).
     """
     title, username = await parser.resolve_channel(channel_ref)
-    telegram_id = str(channel_ref)
+    telegram_id = f"@{username}" if username else str(channel_ref)
     channel = await get_or_create_channel(session, telegram_id, title, username)
     # Persist the channel row before the indexing loop so that a per-post
     # failure cannot wipe it (and the FK from posts -> channels stays valid).
@@ -135,9 +143,15 @@ async def index_all_channels(
     from sqlalchemy import select
 
     from src.db.models import Channel as _Channel
+    from src.db.models import PackChannel
 
     async with session_factory() as s:
-        result = await s.execute(select(_Channel).order_by(_Channel.title))
+        assigned_to_folder = select(PackChannel.pack_id).where(
+            PackChannel.channel_id == _Channel.id
+        )
+        result = await s.execute(
+            select(_Channel).where(assigned_to_folder.exists()).order_by(_Channel.title)
+        )
         channels: Iterable[_Channel] = result.scalars().all()
 
     total = 0

@@ -53,8 +53,8 @@ Generate a Telethon session string for prod (interactive prompt for phone/code/2
 
 ### Two-step LLM search (the core design)
 
-1. **Selector step** (`src/search/selector.py`, `TitleSelector`): loads *all* non-empty post
-   titles (+ channel, date, hashtags) across the relevant channels, orders freshest-first,
+1. **Selector step** (`src/search/selector.py`, `TitleSelector`): loads non-empty post
+   titles (+ channel, date, hashtags) from the current user's folders, orders freshest-first,
    truncates to fit `SELECTOR_TOKEN_BUDGET` using tiktoken, and sends the whole list to
    `SELECTOR_MODEL` in one JSON-mode request. The model returns a JSON object of relevant
    `post_ids`.
@@ -80,7 +80,8 @@ similarity search exists; grep before relying on it.
 SAVEPOINT so one bad post can't roll back the whole batch or the channel row; the channel row
 itself is committed before the indexing loop starts so a mid-run crash never orphans posts via
 a dangling FK. Progress commits happen every 50 created posts. `src/scheduler/tasks.py` runs
-`index_all_channels` on a periodic APScheduler job (`INDEXER_INTERVAL_MINUTES`, default 15).
+`index_all_channels` for channels assigned to at least one folder on a periodic APScheduler job
+(`INDEXER_INTERVAL_MINUTES`, default 15).
 
 ### Retention
 
@@ -98,7 +99,8 @@ are not re-indexed.
 `User` → `ChannelPack` (named groups of channels a user owns) → `PackChannel` (join table) →
 `Channel` → `Post`. Posts carry `title`/`hashtags`/`media` extracted at parse time
 (`src/parser/extract.py`) plus raw `content`. `grouped_id` links album posts. Uniqueness is
-enforced on `(channel_id, telegram_message_id)`.
+enforced on `(channel_id, telegram_message_id)`. Channels and posts are shared internally,
+but `/folders`, folder callbacks, and `/search` are scoped to the current owner.
 
 ### Bot wiring (`src/bot/app.py`)
 

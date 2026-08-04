@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +29,12 @@ class PackNotFoundError(Exception):
 
 class ChannelAlreadyInPackError(Exception):
     """Raised when adding a channel that is already in the pack."""
+
+
+@dataclass(frozen=True)
+class RemoveChannelResult:
+    removed: bool
+    pack_deleted: bool
 
 
 async def get_or_create_user(
@@ -146,21 +154,63 @@ async def delete_pack(
 async def list_pack_channels(
     session: AsyncSession,
     pack_id: int,
+    owner_id: int,
 ) -> list[Channel]:
     stmt = (
         select(Channel)
         .join(PackChannel, PackChannel.channel_id == Channel.id)
-        .where(PackChannel.pack_id == pack_id)
+        .join(ChannelPack, ChannelPack.id == PackChannel.pack_id)
+        .where(
+            PackChannel.pack_id == pack_id,
+            ChannelPack.owner_id == owner_id,
+        )
         .order_by(Channel.title)
     )
     return list((await session.execute(stmt)).scalars().all())
 
 
+async def get_pack_channel(
+    session: AsyncSession,
+    pack_id: int,
+    channel_id: int,
+    owner_id: int,
+) -> Channel | None:
+    stmt = (
+        select(Channel)
+        .join(PackChannel, PackChannel.channel_id == Channel.id)
+        .join(ChannelPack, ChannelPack.id == PackChannel.pack_id)
+        .where(
+            Channel.id == channel_id,
+            PackChannel.pack_id == pack_id,
+            ChannelPack.owner_id == owner_id,
+        )
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
 async def get_pack_channel_ids(
     session: AsyncSession,
     pack_id: int,
+    owner_id: int,
 ) -> list[int]:
-    stmt = select(PackChannel.channel_id).where(PackChannel.pack_id == pack_id)
+    stmt = (
+        select(PackChannel.channel_id)
+        .join(ChannelPack, ChannelPack.id == PackChannel.pack_id)
+        .where(
+            PackChannel.pack_id == pack_id,
+            ChannelPack.owner_id == owner_id,
+        )
+    )
+    return [int(x) for x in (await session.execute(stmt)).scalars().all()]
+
+
+async def get_user_channel_ids(session: AsyncSession, owner_id: int) -> list[int]:
+    stmt = (
+        select(PackChannel.channel_id)
+        .join(ChannelPack, ChannelPack.id == PackChannel.pack_id)
+        .where(ChannelPack.owner_id == owner_id)
+        .distinct()
+    )
     return [int(x) for x in (await session.execute(stmt)).scalars().all()]
 
 
@@ -173,7 +223,11 @@ async def add_channel_to_pack(
     session: AsyncSession,
     pack_id: int,
     channel_id: int,
+    owner_id: int,
 ) -> PackChannel:
+    if await get_pack(session, pack_id, owner_id) is None:
+        raise PackNotFoundError(str(pack_id))
+
     size = await _pack_size(session, pack_id)
     if size >= MAX_CHANNELS_PER_PACK:
         raise PackLimitError(f"max {MAX_CHANNELS_PER_PACK} channels per pack")
@@ -199,7 +253,30 @@ async def remove_channel_from_pack(
     session: AsyncSession,
     pack_id: int,
     channel_id: int,
-) -> bool:
+    owner_id: int,
+) -> RemoveChannelResult:
+    pack = await get_pack(session, pack_id, owner_id)
+    if pack is None:
+        raise PackNotFoundError(str(pack_id))
+
+    channel_ids = [
+        int(value)
+        for value in (
+            await session.execute(
+                select(PackChannel.channel_id).where(PackChannel.pack_id == pack_id)
+            )
+        )
+        .scalars()
+        .all()
+    ]
+    if channel_id not in channel_ids:
+        return RemoveChannelResult(removed=False, pack_deleted=False)
+    if len(channel_ids) == 1:
+        await session.delete(pack)
+        await session.flush()
+        log.info("pack.deleted_empty", owner_id=owner_id, pack_id=pack_id)
+        return RemoveChannelResult(removed=True, pack_deleted=True)
+
     result = await session.execute(
         delete(PackChannel).where(
             PackChannel.pack_id == pack_id,
@@ -209,7 +286,8 @@ async def remove_channel_from_pack(
     # result.rowcount on real SQLAlchemy; fakes may not expose it.
     rowcount = getattr(result, "rowcount", None)
     await session.flush()
-    return bool(rowcount) if rowcount is not None else True
+    removed = bool(rowcount) if rowcount is not None else True
+    return RemoveChannelResult(removed=removed, pack_deleted=False)
 
 
 async def ensure_channel(

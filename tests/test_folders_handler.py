@@ -5,15 +5,16 @@ from types import SimpleNamespace
 from src.bot.handlers.folders import (
     BACK_TO_LIST,
     NEW_PACK,
-    _channels_keyboard,
+    _channel_cb,
+    _channel_keyboard,
     _extract_channel_ref,
+    _format_channel_card,
     _format_pack_card,
     _list_keyboard,
     _pack_cb,
     _pack_keyboard,
+    _parse_channel_cb,
     _parse_pack_cb,
-    _parse_rm_cb,
-    _rm_cb,
 )
 from src.db.models import Channel, ChannelPack
 
@@ -39,18 +40,18 @@ def test_parse_pack_cb_invalid() -> None:
     assert _parse_pack_cb("xx") is None
 
 
-def test_parse_rm_cb() -> None:
-    assert _parse_rm_cb("fr:7:42") == (7, 42)
-    assert _parse_rm_cb("fp:7:open") is None
-    assert _parse_rm_cb("fr:abc:42") is None
+def test_parse_channel_cb() -> None:
+    assert _parse_channel_cb("fc:7:42:update") == (7, 42, "update")
+    assert _parse_channel_cb("fp:7:open") is None
+    assert _parse_channel_cb("fc:abc:42:update") is None
 
 
 def test_pack_cb_format() -> None:
     assert _pack_cb(7, "open") == "fp:7:open"
 
 
-def test_rm_cb_format() -> None:
-    assert _rm_cb(7, 42) == "fr:7:42"
+def test_channel_cb_format() -> None:
+    assert _channel_cb(7, 42, "open") == "fc:7:42:open"
 
 
 def test_list_keyboard_includes_new_button() -> None:
@@ -77,15 +78,25 @@ def test_pack_keyboard_buttons() -> None:
     assert BACK_TO_LIST in flat
 
 
-def test_channels_keyboard_has_remove_buttons_and_back() -> None:
+def test_pack_keyboard_has_channel_cards_and_management() -> None:
     channels = [
         Channel(id=10, telegram_id="@a", title="A"),
         Channel(id=20, telegram_id="@b", title="B"),
     ]
-    kb = _channels_keyboard(7, channels)
+    kb = _pack_keyboard(7, channels)
     flat = [b.callback_data for row in kb.inline_keyboard for b in row]
-    assert "fr:7:10" in flat
-    assert "fr:7:20" in flat
+    assert "fc:7:10:open" in flat
+    assert "fc:7:20:open" in flat
+    assert "fp:7:add" in flat
+    assert "fp:7:rename" in flat
+    assert BACK_TO_LIST in flat
+
+
+def test_channel_keyboard_has_update_remove_and_back() -> None:
+    kb = _channel_keyboard(7, 10)
+    flat = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert "fc:7:10:update" in flat
+    assert "fc:7:10:remove" in flat
     assert "fp:7:open" in flat
 
 
@@ -108,6 +119,19 @@ def test_format_pack_card_escapes_name() -> None:
     out = _format_pack_card(_pack("<x>", 7), [])
     assert "<x>" not in out
     assert "&lt;x&gt;" in out
+
+
+def test_format_channel_card_shows_index_status() -> None:
+    channel = Channel(
+        id=10,
+        telegram_id="@news",
+        title="News",
+        last_indexed_message_id=42,
+    )
+    out = _format_channel_card(channel)
+    assert "News" in out
+    assert "@news" in out
+    assert "42" in out
 
 
 def _msg(text: str = "", forward_origin=None) -> SimpleNamespace:

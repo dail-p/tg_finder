@@ -5,7 +5,8 @@ two-step LLM pipeline: title selection, then full-post answer synthesis.
 
 ## Stage 1 (MVP) scope
 
-- Aiogram 3.x bot with auth whitelist (`/start`, `/help`, `/channels`, `/search`).
+- Aiogram 3.x bot with auth whitelist (`/start`, `/help`, `/folders`, `/search`).
+- Personal channel folders with add, incremental refresh, removal, and folder-scoped search.
 - Telethon-based channel parser with FloodWait handling.
 - Indexer pipeline: full posts (text + media metadata + title/hashtags) → Postgres.
 - Search: LLM title selector → load full posts → LLM answer with source links.
@@ -32,8 +33,8 @@ Telethon, openai (chat), APScheduler, structlog, tiktoken.
    .venv/bin/alembic upgrade head
    ```
 
-4. Add and index a channel (run interactively once to authorize the Telethon user
-   session — a `*.session` file is created in the project root):
+4. Run interactively once to authorize the Telethon user session. A `*.session`
+   file is created in the project root:
 
    ```bash
    .venv/bin/tg-finder-index add @some_channel
@@ -44,6 +45,23 @@ Telethon, openai (chat), APScheduler, structlog, tiktoken.
    ```bash
    python main.py
    ```
+
+6. Open `/folders` in the bot, create a folder, and add channels by `@username`,
+   `t.me/channel` link, or a forwarded channel post. Adding a channel starts the
+   initial indexing immediately.
+
+## Bot usage
+
+- `/folders` is the only channel-management entry point. It creates, renames,
+  and deletes personal folders.
+- Open a folder to add channels or search only within that folder.
+- Open a channel card to index new posts immediately or remove the channel from
+  that folder. Removing the last channel also removes the empty folder.
+- `/search <question>` searches the union of channels in all folders owned by
+  the current user. Channels that only belong to other users are excluded.
+- Shared channel rows and posts are deduplicated internally. Removing a channel
+  from one user's folder never removes it from another user's folders.
+- The scheduler refreshes only channels that still belong to at least one folder.
 
 ## How search works
 
@@ -128,14 +146,11 @@ Run indexing in a separate service so an indexer crash never stops the bot:
 Both deploy from the same repo/image; only `APP_MODE` differs. For a minimal
 setup a single service with `APP_MODE=both` also works.
 
-### 4. Seed channels
+### 4. Add channels
 
-Channels are added via the CLI. Run it once from the Railway shell (or locally
-against the prod `DATABASE_URL`):
-
-```bash
-tg-finder-index add @some_channel
-```
+Open `/folders` in the deployed bot, create a folder, and add channels there.
+The bot indexes each newly added channel immediately; the scheduler handles
+subsequent periodic updates. The CLI remains available for maintenance.
 
 Pushes to `main` trigger the CI (`.github/workflows/ci.yml`); Railway
 auto-deploys on push once GitHub is connected.

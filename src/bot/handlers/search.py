@@ -9,6 +9,7 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.logging_setup import get_logger
+from src.packs import service as packs
 from src.search.answerer import PostAnswerer
 from src.search.llm import get_llm_client
 from src.search.selector import TitleSelector
@@ -90,9 +91,7 @@ def _format_answer(answer) -> str:
 
 
 @search_router.message(Command("search"))
-async def cmd_search(
-    message: Message, command: CommandObject, db_session: AsyncSession
-) -> None:
+async def cmd_search(message: Message, command: CommandObject, db_session: AsyncSession) -> None:
     query = (command.args or "").strip()
     if not query:
         await message.answer(
@@ -101,13 +100,25 @@ async def cmd_search(
         )
         return
 
-    await message.answer("🔍 Ищу по проиндексированным каналам…")
+    user = message.from_user
+    if user is None:
+        await message.answer("Поиск доступен только в личке с ботом.")
+        return
+    channel_ids = await packs.get_user_channel_ids(db_session, user.id)
+    if not channel_ids:
+        await message.answer(
+            "В твоих папках пока нет каналов. Открой /folders, создай папку и "
+            "добавь хотя бы один канал."
+        )
+        return
+
+    await message.answer("🔍 Ищу по каналам из ваших папок…")
 
     llm = get_llm_client()
     answerer = PostAnswerer(selector=TitleSelector(llm=llm), llm=llm)
 
     try:
-        answer = await answerer.answer(db_session, query)
+        answer = await answerer.answer(db_session, query, channel_ids=channel_ids)
     except Exception as exc:
         log.error("search.error", error=str(exc), query=query)
         await message.answer("⚠️ Произошла ошибка при поиске. Попробуйте позже.")

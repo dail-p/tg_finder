@@ -157,9 +157,7 @@ async def test_store_post_skips_existing() -> None:
     session = FakeSession()
     session.set_scalar_returns(99)
     channel = Channel(id=1, telegram_id="@news", title="News")
-    parsed = ParsedPost(
-        telegram_message_id=42, content="текст", media_type="text", posted_at=None
-    )
+    parsed = ParsedPost(telegram_message_id=42, content="текст", media_type="text", posted_at=None)
 
     created = await _store_post(session, channel, parsed)
     assert created is False
@@ -235,13 +233,21 @@ async def test_index_channel_commits_channel_before_loop() -> None:
 
     parser = FakeParser(posts=[])
 
-    channel, created = await index_channel(
-        session, parser, "@news", incremental=False
-    )
+    channel, created = await index_channel(session, parser, "@news", incremental=False)
     assert channel.telegram_id == "@news"
     assert created == 0
     assert session.commit_count >= 1
     assert session.rolled_back is False
+
+
+@pytest.mark.asyncio
+async def test_index_channel_canonicalizes_public_channel_id() -> None:
+    session = FakeSession()
+    session.set_scalar_returns(None)
+
+    channel, _ = await index_channel(session, FakeParser(), "news", incremental=False)
+
+    assert channel.telegram_id == "@news"
 
 
 @pytest.mark.asyncio
@@ -269,9 +275,7 @@ async def test_index_channel_failed_post_does_not_wipe_channel() -> None:
     ]
     parser = FakeParser(posts=posts)
 
-    channel, created = await index_channel(
-        session, parser, "@news", incremental=False
-    )
+    channel, created = await index_channel(session, parser, "@news", incremental=False)
 
     assert channel.id is not None
     assert session.commit_count >= 1
@@ -301,9 +305,7 @@ async def test_index_channel_respects_limit() -> None:
     ]
     parser = FakeParser(posts=posts)
 
-    channel, created = await index_channel(
-        session, parser, "@news", incremental=False, limit=2
-    )
+    channel, created = await index_channel(session, parser, "@news", incremental=False, limit=2)
 
     assert created == 2
     inserted = [o for o in session.added if isinstance(o, Post)]
