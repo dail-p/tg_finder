@@ -1,0 +1,36 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "explore": {
+      "model": "opencode/glm-5.2",
+      "variant": "high"
+    },
+    "scout": {
+      "model": "opencode/glm-5.2",
+      "mode": "subagent"
+    },
+    "code-reviewer": {
+      "model": "opencode/claude-opus-5",
+      "variant": "high"
+    },
+    "debugger": {
+      "model": "opencode/kimi-k3",
+      "variant": "max"
+    },
+    "fastapi-backend": {
+      "model": "opencode/kimi-k3",
+      "variant": "max"
+    },
+    "ml-helper": {
+      "model": "opencode/kimi-k3",
+      "variant": "max"
+    },
+    "next-frontend": {
+      "model": "opencode/claude-sonnet-4-5",
+      "disable": true
+    },
+    "pr-writer": {
+      "model": "opencode/deepseek-v4-flash"
+    }
+  }
+}
