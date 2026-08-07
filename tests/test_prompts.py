@@ -52,4 +52,13 @@ def test_prompt_contains_numbered_sources_and_image_count() -> None:
     assert "[1]" in prompt
     assert "[2]" in prompt
     assert "[изображений: 2]" in prompt
-    assert "Ссылка:" in prompt
+
+
+def test_context_has_no_raw_links_for_the_model_to_copy() -> None:
+    prompt = build_answer_prompt("q", [_post()])
+    assert "https://t.me/" not in prompt
+
+
+def test_system_prompt_asks_for_inline_citations() -> None:
+    assert "[N]" in SYSTEM_PROMPT or "[2]" in SYSTEM_PROMPT
+    assert "не пиши url" in SYSTEM_PROMPT.lower()

@@ -22,6 +22,9 @@ log = get_logger(__name__)
 TELEGRAM_MESSAGE_LIMIT = 4096
 BODY_CHAR_BUDGET = 3500
 SOURCES_CHAR_BUDGET = TELEGRAM_MESSAGE_LIMIT - 50
+# Inline citations turn "[2]" into a full <a href="…">2</a>, so the body grows
+# while it is linked. Cap it with room left for the "Источники" block.
+BODY_HTML_BUDGET = TELEGRAM_MESSAGE_LIMIT - 400
 
 
 # LLMs default to Markdown-ish formatting; Telegram's HTML parse_mode doesn't
@@ -58,6 +61,39 @@ def _truncate_plain(text: str, limit: int) -> str:
     return cut.rstrip() + "…"
 
 
+# The answer prompt asks the model to cite sources as "[2]" or "[1][3]" (and
+# LLMs occasionally write "[1, 2]"), matching the numbering of the context
+# block. Markers pointing outside the source list are left as plain text.
+_CITATION_RE = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
+
+
+def _linkify_citations(text: str, sources: list, budget: int) -> str:
+    """Turn [N] markers into links to the N-th source, staying within budget."""
+    if not sources:
+        return text
+
+    chunks: list[str] = []
+    pos = 0
+    length = len(text)
+    for match in _CITATION_RE.finditer(text):
+        numbers = [n.strip() for n in match.group(1).split(",")]
+        if any(not 1 <= int(n) <= len(sources) for n in numbers):
+            continue
+        links = []
+        for n in numbers:
+            href = html_escape(sources[int(n) - 1].to_link(), quote=True)
+            links.append(f'<a href="{href}">{n}</a>')
+        replacement = "[" + ", ".join(links) + "]"
+        length += len(replacement) - (match.end() - match.start())
+        if length > budget:
+            break
+        chunks.append(text[pos : match.start()])
+        chunks.append(replacement)
+        pos = match.end()
+    chunks.append(text[pos:])
+    return "".join(chunks)
+
+
 def _format_source_line(i: int, src) -> str:
     title = (src.title or "").strip()
     label = f"{src.channel_title} — {title}" if title else src.channel_title
@@ -71,6 +107,7 @@ def format_answer_for_message(answer) -> str:
     # answer.text comes from the LLM and titles/channel names come from raw
     # Telegram post content — neither is safe HTML, so escape before embedding.
     body = _markdown_to_html(_truncate_plain(answer.text, BODY_CHAR_BUDGET))
+    body = _linkify_citations(body, answer.sources, BODY_HTML_BUDGET)
     if answer.no_answer or not answer.sources:
         return body
 

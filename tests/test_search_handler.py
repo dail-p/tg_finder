@@ -118,6 +118,46 @@ def test_long_answer_never_produces_dangling_tag() -> None:
     assert out.count("<b>") == out.count("</b>")
 
 
+def test_citation_marker_becomes_inline_link() -> None:
+    ans = _answer(
+        text="Сборка ускорилась на 30% [1].",
+        sources=[_post("@news", 42)],
+    )
+    out = _format_answer(ans)
+    assert '30% [<a href="https://t.me/news/42">1</a>].' in out
+
+
+def test_multiple_citation_markers_link_to_their_own_sources() -> None:
+    ans = _answer(
+        text="Первое [1]. Второе [2]. Оба [1, 2].",
+        sources=[_post("@news", 42), _post("@other", 7)],
+    )
+    out = _format_answer(ans)
+    assert '[<a href="https://t.me/news/42">1</a>]. Второе' in out
+    assert '[<a href="https://t.me/other/7">2</a>]. Оба' in out
+    assert (
+        '[<a href="https://t.me/news/42">1</a>, <a href="https://t.me/other/7">2</a>]'
+        in out
+    )
+
+
+def test_citation_out_of_range_stays_plain_text() -> None:
+    ans = _answer(text="Утверждение [5].", sources=[_post()])
+    out = _format_answer(ans)
+    assert "Утверждение [5]." in out
+    assert out.count("<a ") == 1  # only the source list line
+
+
+def test_citations_never_overflow_the_message_limit() -> None:
+    ans = _answer(
+        text=" ".join(f"факт номер {i} [1]." for i in range(400)),
+        sources=[_post(channel=f"@news{i}", msg=i) for i in range(20)],
+    )
+    out = _format_answer(ans)
+    assert len(out) <= 4096
+    assert out.count("<a ") == out.count("</a>")
+
+
 class _FakeMessage:
     def __init__(self, user_id: int = 111) -> None:
         self.from_user = SimpleNamespace(id=user_id)
