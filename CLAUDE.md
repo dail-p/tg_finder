@@ -116,9 +116,12 @@ aiogram `Dispatcher` with two middlewares applied globally:
 - `scheduler` — periodic indexer only.
 - `both` (default) — bot + scheduler in one asyncio process/event loop.
 
-In production these are typically split into separate Railway services so an indexer crash
-never takes down the bot (see README for deployment details). Migrations run automatically on
-boot via `docker-entrypoint.sh` (`alembic upgrade head`).
+In production `bot` and `scheduler` run as separate compose services so an indexer crash never
+takes down the bot (see README and `docs/setup/vps-migration.md`). Migrations belong to the
+one-shot `migrate` compose service; `docker-entrypoint.sh` still runs `alembic upgrade head`
+unless `RUN_MIGRATIONS=0`, which compose sets for bot and scheduler. Host-side ops scripts
+(`scripts/deploy.sh`, `backup_db.sh`, `watchdog.sh`) read `.env` through `scripts/_env.sh`
+with grep rather than `source`, so secrets are never re-interpreted by the shell.
 
 ### Config (`src/config.py`)
 

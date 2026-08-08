@@ -1,3 +1,22 @@
+# Production-ready compose: works both locally (`docker compose up --build`)
+# and on a VPS. See docs/setup/vps-migration.md.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    # Without a cap the json-file driver grows until the disk is full.
+    max-size: "10m"
+    max-file: "5"
+
+x-app: &app
+  build: .
+  env_file: .env
+  logging: *default-logging
+  environment: &app-env
+    # Migrations are applied once by the `migrate` service, not per container.
+    RUN_MIGRATIONS: "0"
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tg_finder}:${POSTGRES_PASSWORD:-tg_finder}@db:5432/${POSTGRES_DB:-tg_finder}
+
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -5,8 +24,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-tg_finder}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tg_finder}
       POSTGRES_DB: ${POSTGRES_DB:-tg_finder}
+    # Loopback only. A published port bypasses ufw, because Docker writes its
+    # own iptables rules — "5432:5432" would expose Postgres to the internet.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -14,30 +35,41 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+    logging: *default-logging
 
-  bot:
-    build: .
+  # One-shot migration runner. Single writer of alembic_version, so bot and
+  # scheduler can never race each other on `alembic upgrade head`.
+  migrate:
+    <<: *app
+    entrypoint: ["alembic", "upgrade", "head"]
     depends_on:
       db:
         condition: service_healthy
-    env_file: .env
+    restart: "no"
+
+  bot:
+    <<: *app
     environment:
+      <<: *app-env
       APP_MODE: bot
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tg_finder}:${POSTGRES_PASSWORD:-tg_finder}@db:5432/${POSTGRES_DB:-tg_finder}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   scheduler:
-    build: .
+    <<: *app
+    environment:
+      <<: *app-env
+      APP_MODE: scheduler
     depends_on:
       db:
         condition: service_healthy
-      bot:
-        # start after bot has already applied migrations
-        condition: service_started
-    env_file: .env
-    environment:
-      APP_MODE: scheduler
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tg_finder}:${POSTGRES_PASSWORD:-tg_finder}@db:5432/${POSTGRES_DB:-tg_finder}
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
 volumes:

@@ -103,10 +103,14 @@ tg-finder-index prune                     # delete posts older than the window
 tg-finder-index prune --days 90 --dry-run # preview a different window
 ```
 
-## Production deployment (Railway)
+## Production deployment (VPS)
 
-The bot is a long-running polling service, so it needs an always-on host plus a
-managed Postgres. Railway covers both.
+The bot is a long-running polling service with no inbound traffic: no domain,
+DNS, reverse proxy or TLS is involved. A single VPS running `docker compose`
+(`db` + `migrate` + `bot` + `scheduler`) is the whole deployment.
+
+Migration steps and the rollback path are in
+[docs/setup/vps-migration.md](docs/setup/vps-migration.md) (Russian).
 
 ### 1. One-time: generate the Telethon session string
 
@@ -119,47 +123,63 @@ python scripts/gen_session.py   # enter phone + code (+ 2FA) when prompted
 
 Copy the printed value into `TELEGRAM_SESSION_STRING`.
 
-### 2. Create the Railway project
+### 2. Prepare the server
 
-1. New Project → **Deploy from GitHub repo**, select this repo. Railway uses
-   `railway.json` / `Dockerfile` automatically.
-2. Add a **PostgreSQL** service.
-3. Set variables on the app service:
-   - `BOT_TOKEN`, `ALLOWED_USER_IDS`
-   - `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION_STRING`
-   - `OPENAI_API_KEY` (+ `OPENAI_BASE_URL` if using a proxy)
-   - `DATABASE_URL` — reference the Postgres plugin
-     (`postgresql+asyncpg://...`; a plain `postgresql://` URL is auto-normalized)
-   - Optional: `SELECTOR_MODEL`, `ANSWER_MODEL`
-   - `ENVIRONMENT=prod`, `LOG_LEVEL=INFO`, `APP_MODE=bot`
+Debian 12 / Ubuntu 22.04+, 2 vCPU / 4 GB RAM / 40 GB SSD. As root:
 
-Migrations run automatically on every boot via `docker-entrypoint.sh`
-(`alembic upgrade head`).
+```bash
+curl -fsSL https://raw.githubusercontent.com/dail-p/tg_finder/main/scripts/vps_bootstrap.sh -o bootstrap.sh
+bash bootstrap.sh   # deploy user, SSH hardening, ufw, swap, Docker
+```
 
-### 3. (Recommended) split bot and scheduler
+The script refuses to run without an SSH key in `/root/.ssh/authorized_keys` —
+disabling password auth without one locks you out.
 
-Run indexing in a separate service so an indexer crash never stops the bot:
+### 3. Deploy
 
-- Service **bot**: `APP_MODE=bot`
-- Service **scheduler**: `APP_MODE=scheduler`
+```bash
+ssh deploy@<ip>
+git clone https://github.com/dail-p/tg_finder.git && cd tg_finder
+cp .env.example .env && nano .env && chmod 600 .env
+./scripts/deploy.sh
+```
 
-Both deploy from the same repo/image; only `APP_MODE` differs. For a minimal
-setup a single service with `APP_MODE=both` also works.
+`deploy.sh` validates `.env`, pulls, builds, runs migrations, starts the
+services and exits non-zero if any of them is not running.
 
-### 4. Add channels
+The `migrate` service owns `alembic upgrade head`; `bot` and `scheduler` wait
+for it via `condition: service_completed_successfully` and run with
+`RUN_MIGRATIONS=0`, so two containers can never race on the same migration.
+A failed migration leaves the previous version running.
+
+### 4. Backups and alerts
+
+```bash
+./scripts/install_cron.sh   # pg_dump daily at 04:00 + watchdog every 15 min
+```
+
+`scripts/backup_db.sh` writes rotated `pg_dump -Fc` archives (and uploads them
+via rclone if `BACKUP_REMOTE` is set). `scripts/watchdog.sh` reports a stopped
+container, a restart loop or a filling disk to Telegram using the bot's token.
+
+### 5. Add channels
 
 Open `/folders` in the deployed bot, create a folder, and add channels there.
 The bot indexes each newly added channel immediately; the scheduler handles
 subsequent periodic updates. The CLI remains available for maintenance.
 
-Pushes to `main` trigger the CI (`.github/workflows/ci.yml`); Railway
-auto-deploys on push once GitHub is connected.
+Pushes to `main` trigger the CI (`.github/workflows/ci.yml`). Deployment is
+manual: `./scripts/deploy.sh` on the server.
 
 ### Local prod-like run
 
 ```bash
 docker compose up --build   # db + bot + scheduler, migrations auto-applied
 ```
+
+Postgres is published on `127.0.0.1:5432` only — a public bind would bypass
+`ufw`, since Docker writes its own iptables rules. Reach it from a laptop with
+`ssh -L 5432:127.0.0.1:5432 deploy@<ip>`.
 
 ## Project layout
 
@@ -173,4 +193,5 @@ src/
   search/     title selector, post answerer, shared LLM client
   prompts/    LLM prompt templates (select + answer)
 alembic/      migrations (initial schema)
+scripts/      session generator + VPS ops (bootstrap, deploy, backup, watchdog)
 ```
